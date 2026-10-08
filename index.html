@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#d9d4f7">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gastos GR">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Gastos personales · Guillermo Rodríguez</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23c9c2f5'/%3E%3Ccircle cx='32' cy='33' r='21' fill='%23fff' fill-opacity='.6'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Georgia,serif' font-weight='700' font-size='21' fill='%233b3470'%3EGR%3C/text%3E%3Ccircle cx='51' cy='14' r='9' fill='%23bfe8d8' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -187,6 +193,11 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
 
 <!-- AJUSTES -->
 <section class="tab" id="t-aj">
+  <div class="card" id="inst" hidden>
+    <h2 style="margin-top:0">Instalar la app</h2>
+    <p style="margin-top:0;font-size:.92rem">Instalala para abrirla con un toque, con su logo y sin la barra del navegador.</p>
+    <button type="button" class="main" id="instalar">Instalar</button>
+  </div>
   <div class="card">
     <h2 style="margin-top:0">Categorías de gastos</h2>
     <div class="chips" id="chips-gasto"></div>
@@ -396,6 +407,11 @@ function leerEnlace(){
   history.replaceState(null,"",location.pathname+location.search);
   return true;
 }
+let evInst=null;
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();evInst=e;$("inst").hidden=false});
+addEventListener("appinstalled",()=>{$("inst").hidden=true;evInst=null});
+$("instalar").onclick=async()=>{if(!evInst)return;evInst.prompt();await evInst.userChoice;evInst=null;$("inst").hidden=true};
+if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 (async()=>{
   await cargar();
   const conectar=leerEnlace();
