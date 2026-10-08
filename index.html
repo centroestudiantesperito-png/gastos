@@ -208,6 +208,7 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
     <div class="tools" style="margin-top:12px">
       <button type="button" class="main" id="s-save">Guardar conexión y enviar</button>
       <button type="button" id="s-pull">Traer datos de la nube</button>
+      <button type="button" id="s-link">Copiar enlace de conexión</button>
     </div>
     <h2>Copia en archivo</h2>
     <div class="tools">
@@ -357,6 +358,12 @@ function init(){
     try{await bajar();llenarCats();pintar();pintarAj();estado("Datos traídos de la nube")}
     catch(e){alert("No se pudo leer la nube. Revisá la dirección y la clave.")}
   };
+  $("s-link").onclick=()=>{
+    const u=$("url").value.trim(),c=$("clave").value.trim();
+    if(!u){alert("Primero cargá la dirección de la aplicación web.");return}
+    const link=location.origin+location.pathname+"#nube="+encodeURIComponent(u)+"&clave="+encodeURIComponent(c);
+    (navigator.clipboard?navigator.clipboard.writeText(link):Promise.reject()).then(()=>alert("Enlace copiado. Quien lo abra queda conectado a la misma nube. Compartilo solo con Guillermo.")).catch(()=>prompt("Copiá este enlace:",link));
+  };
   $("exp").onclick=()=>descargar(JSON.stringify(S,null,2),"gastos-"+hoy()+".json","application/json");
   $("imp").onclick=()=>$("file").click();
   $("file").onchange=e=>{
@@ -380,7 +387,26 @@ function cerrarSplash(){$("splash").classList.add("off");setTimeout(()=>$("splas
 $("entrar").onclick=cerrarSplash;$("splash").addEventListener("click",cerrarSplash);
 setTimeout(cerrarSplash,3200);
 
-(async()=>{await cargar();init();})();
+function persistir(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}idbPut(JSON.parse(JSON.stringify(S)))}
+function leerEnlace(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  const u=h.get("nube");
+  if(!u)return false;
+  S.sync={url:u,clave:h.get("clave")||""};
+  history.replaceState(null,"",location.pathname+location.search);
+  return true;
+}
+(async()=>{
+  await cargar();
+  const conectar=leerEnlace();
+  init();
+  if(conectar){
+    if(S.movs.length===0){
+      try{await bajar();llenarCats();pintar();estado("Conectado: datos traídos de la nube")}
+      catch(e){persistir();estado("Conectado. No se pudieron leer los datos de la nube todavía")}
+    }else{guardar();estado("Conectado a la nube")}
+  }
+})();
 </script>
 </body>
 </html>
