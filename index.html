@@ -96,6 +96,12 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
 .tools{display:flex;gap:8px;flex-wrap:wrap}
 .ph{display:none}
 
+.tiles.evo{grid-template-columns:repeat(3,1fr);margin-bottom:12px}
+.tile small{display:block;position:relative;font-weight:700;font-size:.82rem;margin-top:2px}
+.nota{margin:6px 0;font-size:.95rem}
+td.in,td.out,td.mute{font-weight:600}
+@media (max-width:560px){.tiles.evo{grid-template-columns:1fr}}
+.ac{display:flex;gap:6px;flex:none}
 /* bienvenida */
 #splash{position:fixed;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:24px;
  background:radial-gradient(420px 320px at 85% 10%,#fff6 0,transparent 70%),linear-gradient(150deg,#d9d4f7,#cfe6f7 55%,#cdeee0);transition:opacity .6s}
@@ -158,6 +164,7 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
     <div class="tile gas"><span>Gastos</span><b class="out" id="gas">$ 0</b></div>
   </div>
   <form class="card grid" id="f">
+    <div class="full nota" id="editando" hidden><b>Editando un movimiento</b> · los cambios reemplazan al original.</div>
     <div class="full seg">
       <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
       <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
@@ -166,7 +173,8 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
     <div><label class="l" for="fecha">Fecha</label><input id="fecha" type="date" required></div>
     <div><label class="l" for="cat">Categoría</label><select id="cat"></select></div>
     <div><label class="l" for="nota">Detalle (opcional)</label><input id="nota" type="text" maxlength="80"></div>
-    <button class="main full" type="submit">Guardar movimiento</button>
+    <button class="main full" type="submit" id="guardar">Guardar movimiento</button>
+    <button class="full" type="button" id="cancelar" hidden>Cancelar edición</button>
   </form>
   <h2>Gastos por categoría</h2>
   <div class="card" id="cats"></div>
@@ -180,6 +188,17 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
   <div class="filters noprint">
     <div><label class="l" for="anio">Año</label><select id="anio"></select></div>
     <div><label class="l" for="verTipo">Categorías de</label><select id="verTipo"><option value="gasto">Gastos</option><option value="ingreso">Ingresos</option></select></div>
+    <div><label class="l" for="verVista">Tabla mensual</label><select id="verVista"><option value="monto">Montos</option><option value="var">Variación % mensual</option></select></div>
+  </div>
+  <h2>Evolución respecto del mes anterior</h2>
+  <div class="card">
+    <div class="filters noprint" style="margin-bottom:10px">
+      <div><label class="l" for="evMes">Mes a analizar</label><input type="month" id="evMes"></div>
+      <div><label class="l" for="evTipo">Ver</label><select id="evTipo"><option value="gasto">Gastos</option><option value="ingreso">Ingresos</option></select></div>
+    </div>
+    <div class="tiles evo" id="evo-tiles"></div>
+    <div id="evo-notas"></div>
+    <div class="scroll" id="evo-tabla"></div>
   </div>
   <h2>Resumen por mes</h2>
   <div class="card scroll" id="r-mes"></div>
@@ -234,7 +253,7 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
 <script>
 const KEY="gastos-v2",MESES=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const DEF={gasto:["Comida","Supermercado","Transporte","Combustible","Vivienda","Alquiler","Servicios","Internet y celular","Salud","Educación","Ocio","Ropa","Compras","Mascotas","Impuestos","Regalos","Otros"],ingreso:["Sueldo","Extra","Intereses","Ventas","Otros"]};
-let S={movs:[],cats:JSON.parse(JSON.stringify(DEF)),sync:{url:"",clave:""}};
+let S={movs:[],cats:JSON.parse(JSON.stringify(DEF)),sync:{url:"",clave:""},borrados:{},catsMod:0};
 const $=id=>document.getElementById(id);
 const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 const num=n=>n?n.toLocaleString("es-AR",{maximumFractionDigits:0}):"–";
@@ -258,19 +277,57 @@ function guardar(){
 }
 function estado(t){$("estado").textContent=t}
 let tm;
-function programar(){if(!S.sync.url)return;clearTimeout(tm);estado("Pendiente de enviar…");tm=setTimeout(subir,1500)}
+function programar(){if(!S.sync.url)return;clearTimeout(tm);estado("Pendiente de enviar…");tm=setTimeout(sincronizar,1500)}
 async function subir(){
   if(!S.sync.url)return;
   try{
-    await fetch(S.sync.url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({clave:S.sync.clave,movs:S.movs,cats:S.cats})});
+    await fetch(S.sync.url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({clave:S.sync.clave,movs:S.movs,cats:S.cats,catsMod:S.catsMod,borrados:Object.entries(S.borrados).map(([id,t])=>({id:Number(id),t}))})});
     estado("Enviado a la nube · "+new Date().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}));
   }catch(e){estado("Sin conexión: se reintenta con el próximo cambio")}
+}
+let enCurso=false,pendiente=false,ultimaSync=0;
+const tombMap=a=>{const o={};(a||[]).forEach(b=>{o[b.id]=b.t});return o};
+function fusionar(j){
+  const mapa=new Map();
+  const ver=m=>{const k=String(m.id),c=mapa.get(k);if(!c||(m.mod||0)>(c.mod||0))mapa.set(k,m)};
+  S.movs.forEach(ver);(j.movs||[]).forEach(ver);
+  const b=Object.assign({},S.borrados),rb=tombMap(j.borrados);
+  for(const k in rb)if(!(b[k]>=rb[k]))b[k]=rb[k];
+  S.movs=[...mapa].filter(([k,m])=>!(b[k]!==undefined&&b[k]>=(m.mod||0))).map(([,m])=>m);
+  const lim=Date.now()-365*864e5;
+  for(const k in b)if(b[k]<lim)delete b[k];
+  S.borrados=b;
+  if((j.catsMod||0)>S.catsMod&&j.cats&&j.cats.gasto&&j.cats.gasto.length){S.cats=j.cats;S.catsMod=j.catsMod}
+}
+function repintar(){
+  llenarCats();pintar();
+  if(!$("t-aj").classList.contains("on"))pintarAj();
+  if($("t-inf").classList.contains("on"))pintarInf();
+}
+async function sincronizar(){
+  if(!S.sync.url)return;
+  if(enCurso){pendiente=true;return}
+  enCurso=true;clearTimeout(tm);
+  try{
+    estado("Sincronizando…");
+    const r=await fetch(S.sync.url+"?clave="+encodeURIComponent(S.sync.clave));
+    const j=await r.json();
+    if(j.error){estado("La clave no coincide con la de la nube. Revisá Ajustes.");return}
+    const viejo=!Array.isArray(j.borrados);
+    if(viejo){
+      if(!S.movs.length&&(j.movs||[]).length){S.movs=j.movs;persistir();repintar()}
+    }else{fusionar(j);persistir();repintar()}
+    await subir();
+    if(viejo)estado("Enviado, pero falta actualizar Code.gs para sincronizar varios dispositivos");
+    ultimaSync=Date.now();
+  }catch(e){estado("Sin conexión: se reintenta con el próximo cambio")}
+  finally{enCurso=false;if(pendiente){pendiente=false;sincronizar()}}
 }
 async function bajar(){
   const r=await fetch(S.sync.url+"?clave="+encodeURIComponent(S.sync.clave));
   const j=await r.json();
   if(j.error)throw new Error(j.error);
-  S.movs=j.movs||[];
+  S.movs=j.movs||[];S.borrados=tombMap(j.borrados);S.catsMod=j.catsMod||0;
   if(j.cats&&j.cats.gasto&&j.cats.gasto.length)S.cats=j.cats;
   try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
   idbPut(JSON.parse(JSON.stringify(S)));
@@ -279,10 +336,25 @@ async function cargar(){
   let d=null;
   try{d=JSON.parse(localStorage.getItem(KEY))}catch(e){}
   if(!d||!d.movs)d=await idbGet();
-  if(d&&d.movs){S.movs=d.movs;S.cats=d.cats||S.cats;S.sync=d.sync||S.sync;guardar()}
+  if(d&&d.movs){S.movs=d.movs;S.cats=d.cats||S.cats;S.sync=d.sync||S.sync;S.borrados=d.borrados||{};S.catsMod=d.catsMod||0;persistir()}
 }
 
 /* ---- movimientos ---- */
+let editId=null;
+function editar(id){
+  const d=S.movs.find(x=>String(x.id)===id);if(!d)return;
+  editId=d.id;
+  document.querySelector('input[name=tipo][value="'+d.tipo+'"]').checked=true;
+  llenarCats();
+  if(![...$("cat").options].some(o=>o.value===d.cat)){const o=document.createElement("option");o.textContent=d.cat;$("cat").appendChild(o)}
+  $("cat").value=d.cat;$("monto").value=d.monto;$("fecha").value=d.fecha;$("nota").value=d.nota||"";
+  $("guardar").textContent="Guardar cambios";$("cancelar").hidden=false;$("editando").hidden=false;
+  $("f").scrollIntoView({behavior:"smooth",block:"center"});$("monto").focus();
+}
+function salirEdicion(){
+  editId=null;$("f").reset();$("fecha").value=hoy();llenarCats();
+  $("guardar").textContent="Guardar movimiento";$("cancelar").hidden=true;$("editando").hidden=true;
+}
 function llenarCats(){$("cat").innerHTML=S.cats[tipo()].map(c=>`<option>${esc(c)}</option>`).join("")}
 function pintar(){
   const m=$("mes").value;
@@ -294,16 +366,67 @@ function pintar(){
   const por={};del.filter(d=>d.tipo==="gasto").forEach(d=>por[d.cat]=(por[d.cat]||0)+d.monto);
   const o=Object.entries(por).sort((a,b)=>b[1]-a[1]);
   $("cats").innerHTML=o.length?o.map(([c,v])=>`<div class="cat"><div><span>${icono(c)} ${esc(c)}</span><span>${money(v)} · ${Math.round(v/gas*100)}%</span></div><div class="bar"><i style="width:${v/o[0][1]*100}%;background:${color(c)[1]}"></i></div></div>`).join(""):'<div class="empty">Todavía no hay gastos este mes.</div>';
-  $("lista").innerHTML=del.length?del.map(d=>`<li><span class="av" style="background:${color(d.cat)[0]}">${icono(d.cat)}</span><div class="d"><b>${esc(d.nota||d.cat)}</b><small>${d.fecha.split("-").reverse().join("/")} · ${esc(d.cat)}</small></div><b class="${d.tipo==="gasto"?"out":"in"}">${d.tipo==="gasto"?"−":"+"}${money(d.monto)}</b><button type="button" data-id="${d.id}" aria-label="Eliminar movimiento">Borrar</button></li>`).join(""):'<li class="empty">Sin movimientos en este mes. Cargá el primero arriba.</li>';
+  $("lista").innerHTML=del.length?del.map(d=>`<li><span class="av" style="background:${color(d.cat)[0]}">${icono(d.cat)}</span><div class="d"><b>${esc(d.nota||d.cat)}</b><small>${d.fecha.split("-").reverse().join("/")} · ${esc(d.cat)}</small></div><b class="${d.tipo==="gasto"?"out":"in"}">${d.tipo==="gasto"?"−":"+"}${money(d.monto)}</b><span class="ac"><button type="button" data-ed="${d.id}" aria-label="Editar movimiento">Editar</button><button type="button" data-id="${d.id}" aria-label="Eliminar movimiento">Borrar</button></span></li>`).join(""):'<li class="empty">Sin movimientos en este mes. Cargá el primero arriba.</li>';
 }
 
 /* ---- informes ---- */
-let rep={mes:[],cat:[]};
+let rep={mes:[],cat:[],evo:[]};
+/* ---- evolución ---- */
+const sumPor=(mes,tp)=>{const o={};S.movs.forEach(d=>{if(d.tipo===tp&&d.fecha.startsWith(mes))o[d.cat]=(o[d.cat]||0)+d.monto});return o};
+const mesAnt=m=>{let[y,k]=m.split("-").map(Number);k--;if(k===0){k=12;y--}return y+"-"+String(k).padStart(2,"0")};
+const etiq=x=>MESES[+x.slice(5,7)-1]+" "+x.slice(0,4);
+const pct=(a,b)=>a>0?(b-a)/a*100:(b>0?null:0);
+function fpct(p){if(p===null)return"Nuevo";const r=Math.round(p);return r>0?"▲ +"+r+"%":r<0?"▼ −"+Math.abs(r)+"%":"= 0%"}
+function fcorto(p){if(p===null)return"nuevo";const r=Math.round(p);return r>0?"+"+r+"%":r<0?"−"+Math.abs(r)+"%":"0%"}
+function cls(p,tp){
+  if(p===null)return tp==="gasto"?"out":"in";
+  const r=Math.round(p);if(r===0)return"mute";
+  return(tp==="gasto"?r<0:r>0)?"in":"out";
+}
+function pintarEvo(){
+  const m=$("evMes").value||hoy().slice(0,7),a=mesAnt(m),tp=$("evTipo").value;
+  const tot=(mes,t)=>Object.values(sumPor(mes,t)).reduce((s,v)=>s+v,0);
+  const i0=tot(a,"ingreso"),i1=tot(m,"ingreso"),g0=tot(a,"gasto"),g1=tot(m,"gasto");
+  const b1=i1-g1,db=b1-(i0-g0),pi=pct(i0,i1),pg=pct(g0,g1);
+  const tile=(c,n,v,sm,k)=>`<div class="tile ${c}"><span>${n}</span><b>${money(v)}</b><small class="${k}">${sm}</small></div>`;
+  $("evo-tiles").innerHTML=
+    tile("ing","Ingresos",i1,fpct(pi)+" vs "+etiq(a),cls(pi,"ingreso"))+
+    tile("gas","Gastos",g1,fpct(pg)+" vs "+etiq(a),cls(pg,"gasto"))+
+    tile("bal","Balance",b1,(db>=0?"▲ ":"▼ ")+money(Math.abs(db))+" vs "+etiq(a),db>=0?"in":"out");
+  const A=sumPor(a,tp),B=sumPor(m,tp);
+  const rows=[...new Set([...Object.keys(A),...Object.keys(B)])].map(c=>{const x=A[c]||0,y=B[c]||0;return{c,x,y,d:y-x,p:pct(x,y)}}).sort((u,v)=>v.y-u.y||v.x-u.x);
+  const t0=rows.reduce((s,r)=>s+r.x,0),t1=rows.reduce((s,r)=>s+r.y,0),pt=pct(t0,t1);
+  rep.evo=[["Categoría","Mes anterior ("+a+")","Este mes ("+m+")","Diferencia","Variación %"],
+    ...rows.map(r=>[r.c,r.x,r.y,r.d,r.p===null?"nuevo":Math.round(r.p)+"%"]),["Total",t0,t1,t1-t0,pt===null?"nuevo":Math.round(pt)+"%"]];
+  if(!rows.length){
+    $("evo-notas").innerHTML="";
+    $("evo-tabla").innerHTML='<div class="empty">No hay '+(tp==="gasto"?"gastos":"ingresos")+" en "+etiq(a)+" ni en "+etiq(m)+".</div>";
+    return;
+  }
+  const sube=rows.filter(r=>r.p!==null&&Math.round(r.p)>0).sort((u,v)=>v.p-u.p)[0];
+  const baja=rows.filter(r=>r.p!==null&&Math.round(r.p)<0).sort((u,v)=>u.p-v.p)[0];
+  const nuevos=rows.filter(r=>r.p===null);
+  let n="";
+  if(sube)n+=`<p class="nota"><b class="${cls(sube.p,tp)}">${icono(sube.c)} ${esc(sube.c)} subió ${Math.round(sube.p)}%</b> (${money(sube.d)} más que en ${etiq(a)}).</p>`;
+  if(baja)n+=`<p class="nota"><b class="${cls(baja.p,tp)}">${icono(baja.c)} ${esc(baja.c)} bajó ${Math.abs(Math.round(baja.p))}%</b> (${money(-baja.d)} menos que en ${etiq(a)}).</p>`;
+  if(nuevos.length)n+=`<p class="nota mute">Sin movimientos en ${etiq(a)}: ${nuevos.map(r=>esc(r.c)).join(", ")}.</p>`;
+  $("evo-notas").innerHTML=n;
+  const sg=d=>d>0?"+":d<0?"−":"";
+  $("evo-tabla").innerHTML=`<table><thead><tr><th>Categoría</th><th>${etiq(a)}</th><th>${etiq(m)}</th><th>Diferencia</th><th>Variación</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${icono(r.c)} ${esc(r.c)}</td><td>${num(r.x)}</td><td>${num(r.y)}</td><td class="${cls(r.p,tp)}">${sg(r.d)}${num(Math.abs(r.d))}</td><td class="${cls(r.p,tp)}">${fpct(r.p)}</td></tr>`).join("")}</tbody><tfoot><tr><td>Total</td><td>${num(t0)}</td><td>${num(t1)}</td><td class="${cls(pt,tp)}">${sg(t1-t0)}${num(Math.abs(t1-t0))}</td><td class="${cls(pt,tp)}">${fpct(pt)}</td></tr></tfoot></table>`;
+}
+function tablaCat(filas,cm,tt,y,tp){
+  if(!filas.length)return'<div class="empty">No hay movimientos de este tipo en '+y+".</div>";
+  if($("verVista").value!=="var")
+    return`<table><thead><tr><th>Categoría</th>${MESES.map(m=>`<th>${m}</th>`).join("")}<th>Total</th><th>%</th></tr></thead><tbody>${filas.map(f=>`<tr><td>${esc(f[0])}</td>${f[1].map(v=>`<td>${num(v)}</td>`).join("")}<td><b>${num(f[2])}</b></td><td>${Math.round(f[2]/tt*100)}%</td></tr>`).join("")}</tbody><tfoot><tr><td>Total</td>${cm.map(v=>`<td>${num(v)}</td>`).join("")}<td>${num(tt)}</td><td>100%</td></tr></tfoot></table>`;
+  const dic=sumPor((y-1)+"-12",tp),dt=Object.values(dic).reduce((a,b)=>a+b,0);
+  const cel=(prev,cur)=>{if(!prev&&!cur)return"<td>–</td>";const p=pct(prev,cur);return`<td class="${cls(p,tp)}">${fcorto(p)}</td>`};
+  return`<table><thead><tr><th>Categoría</th>${MESES.map(m=>`<th>${m}</th>`).join("")}</tr></thead><tbody>${filas.map(f=>`<tr><td>${esc(f[0])}</td>${f[1].map((v,k)=>cel(k?f[1][k-1]:(dic[f[0]]||0),v)).join("")}</tr>`).join("")}</tbody><tfoot><tr><td>Total</td>${cm.map((v,k)=>cel(k?cm[k-1]:dt,v)).join("")}</tr></tfoot></table><p class="mute" style="font-size:.85rem;margin:8px 0 0">Cada celda compara el mes con el anterior. Verde: mejora (menos gasto o más ingreso). Rosa: empeora.</p>`;
+}
 function pintarInf(){
   const años=[...new Set(S.movs.map(d=>d.fecha.slice(0,4)).concat(hoy().slice(0,4)))].sort().reverse();
   const sel=$("anio").value||años[0];
   $("anio").innerHTML=años.map(a=>`<option${a===sel?" selected":""}>${a}</option>`).join("");
-  const y=$("anio").value,tp=$("verTipo").value;$("ph").textContent="Informe "+y+" · "+TITULAR;
+  const y=$("anio").value,tp=$("verTipo").value;$("ph").textContent="Informe "+y+" · "+TITULAR;pintarEvo();
   const del=S.movs.filter(d=>d.fecha.startsWith(y));
   const mm=Array.from({length:12},()=>({i:0,g:0}));
   del.forEach(d=>{mm[+d.fecha.slice(5,7)-1][d.tipo==="ingreso"?"i":"g"]+=d.monto});
@@ -316,7 +439,7 @@ function pintarInf(){
   const cm=Array(12).fill(0);filas.forEach(f=>f[1].forEach((v,k)=>cm[k]+=v));
   const tt=filas.reduce((s,f)=>s+f[2],0);
   rep.cat=[["Categoría",...MESES,"Total","%"],...filas.map(f=>[f[0],...f[1],f[2],tt?Math.round(f[2]/tt*100):0]),["Total",...cm,tt,100]];
-  $("r-cat").innerHTML=filas.length?`<table><thead><tr><th>Categoría</th>${MESES.map(m=>`<th>${m}</th>`).join("")}<th>Total</th><th>%</th></tr></thead><tbody>${filas.map(f=>`<tr><td>${esc(f[0])}</td>${f[1].map(v=>`<td>${num(v)}</td>`).join("")}<td><b>${num(f[2])}</b></td><td>${Math.round(f[2]/tt*100)}%</td></tr>`).join("")}</tbody><tfoot><tr><td>Total</td>${cm.map(v=>`<td>${num(v)}</td>`).join("")}<td>${num(tt)}</td><td>100%</td></tr></tfoot></table>`:'<div class="empty">No hay movimientos de este tipo en '+y+'.</div>';
+  $("r-cat").innerHTML=tablaCat(filas,cm,tt,y,tp);
 }
 
 /* ---- ajustes ---- */
@@ -328,39 +451,41 @@ function pintarAj(){
 
 /* ---- eventos ---- */
 function init(){
-  $("fecha").value=hoy();$("mes").value=hoy().slice(0,7);
+  $("fecha").value=hoy();$("mes").value=hoy().slice(0,7);$("evMes").value=hoy().slice(0,7);
   document.querySelectorAll("input[name=tipo]").forEach(r=>r.addEventListener("change",llenarCats));
   $("f").addEventListener("submit",e=>{
     e.preventDefault();const monto=parseFloat($("monto").value);if(!(monto>0))return;
-    S.movs.push({id:Date.now(),tipo:tipo(),monto,fecha:$("fecha").value,cat:$("cat").value,nota:$("nota").value.trim()});
-    guardar();$("monto").value="";$("nota").value="";$("mes").value=$("fecha").value.slice(0,7);pintar();$("monto").focus();
+    const nuevo={tipo:tipo(),monto,fecha:$("fecha").value,cat:$("cat").value,nota:$("nota").value.trim(),mod:Date.now()};
+    if(editId!==null){const i=S.movs.findIndex(x=>x.id===editId);if(i>=0)S.movs[i]=Object.assign({},S.movs[i],nuevo)}
+    else S.movs.push(Object.assign({id:Date.now()},nuevo));
+    guardar();$("monto").value="";$("nota").value="";$("mes").value=nuevo.fecha.slice(0,7);pintar();if(editId!==null)salirEdicion();$("monto").focus();
   });
-  $("mes").addEventListener("change",pintar);
-  $("lista").addEventListener("click",e=>{const id=e.target.dataset.id;if(id&&confirm("¿Borrar este movimiento?")){S.movs=S.movs.filter(d=>String(d.id)!==id);guardar();pintar()}});
+  $("mes").addEventListener("change",pintar);$("cancelar").onclick=salirEdicion;$("lista").addEventListener("click",e=>{const ed=e.target.dataset.ed;if(ed)editar(ed)});
+  $("lista").addEventListener("click",e=>{const id=e.target.dataset.id;if(id&&confirm("¿Borrar este movimiento?")){S.movs=S.movs.filter(d=>String(d.id)!==id);S.borrados[id]=Date.now();if(String(editId)===id)salirEdicion();guardar();pintar()}});
   document.querySelectorAll("nav button").forEach(b=>b.addEventListener("click",()=>{
     document.querySelectorAll("nav button").forEach(x=>x.setAttribute("aria-selected",x===b));
     document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.id==="t-"+b.dataset.tab));
     if(b.dataset.tab==="inf")pintarInf();if(b.dataset.tab==="aj")pintarAj();
   }));
-  $("anio").addEventListener("change",pintarInf);$("verTipo").addEventListener("change",pintarInf);
+  $("anio").addEventListener("change",pintarInf);$("verTipo").addEventListener("change",pintarInf);$("verVista").addEventListener("change",pintarInf);$("evMes").addEventListener("change",pintarEvo);$("evTipo").addEventListener("change",pintarEvo);
   $("print").onclick=()=>window.print();
   $("csv").onclick=()=>{
     const f=a=>a.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(";")).join("\r\n");
-    descargar("\ufeff"+f(rep.mes)+"\r\n\r\n"+f(rep.cat),"informe-"+$("anio").value+".csv","text/csv;charset=utf-8");
+    descargar("\ufeff"+f(rep.mes)+"\r\n\r\n"+f(rep.cat)+"\r\n\r\n"+f(rep.evo),"informe-"+$("anio").value+".csv","text/csv;charset=utf-8");
   };
   document.querySelectorAll("[data-add]").forEach(b=>b.addEventListener("click",()=>{
     const t=b.dataset.add,inp=$("nuevo-"+t),v=inp.value.trim();
-    if(v&&!S.cats[t].some(c=>c.toLowerCase()===v.toLowerCase())){S.cats[t].push(v);guardar();llenarCats();pintarAj()}
+    if(v&&!S.cats[t].some(c=>c.toLowerCase()===v.toLowerCase())){S.cats[t].push(v);S.catsMod=Date.now();guardar();llenarCats();pintarAj()}
     inp.value="";inp.focus();
   }));
   ["gasto","ingreso"].forEach(t=>$("nuevo-"+t).addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();document.querySelector(`[data-add=${t}]`).click()}}));
   document.querySelectorAll(".chips").forEach(c=>c.addEventListener("click",e=>{
     const t=e.target.dataset.t;if(!t)return;
-    S.cats[t]=S.cats[t].filter(x=>x!==e.target.dataset.c);guardar();llenarCats();pintarAj();
+    S.cats[t]=S.cats[t].filter(x=>x!==e.target.dataset.c);S.catsMod=Date.now();guardar();llenarCats();pintarAj();
   }));
   $("s-save").onclick=()=>{
     S.sync={url:$("url").value.trim(),clave:$("clave").value.trim()};guardar();
-    if(S.sync.url)subir();else estado("Nube desactivada");
+    if(S.sync.url)sincronizar();else estado("Nube desactivada");
   };
   $("s-pull").onclick=async()=>{
     S.sync={url:$("url").value.trim(),clave:$("clave").value.trim()};
@@ -380,7 +505,7 @@ function init(){
   $("file").onchange=e=>{
     const f=e.target.files[0];if(!f)return;const r=new FileReader();
     r.onload=()=>{try{const j=JSON.parse(r.result);if(!Array.isArray(j.movs))throw 0;
-      if(confirm("Esto reemplaza los datos actuales. ¿Continuar?")){S.movs=j.movs;S.cats=j.cats||S.cats;guardar();llenarCats();pintar();pintarAj()}}
+      if(confirm("Esto reemplaza los datos actuales. ¿Continuar?")){const ahora=Date.now(),ids=new Set(j.movs.map(m=>String(m.id)));S.movs.forEach(m=>{if(!ids.has(String(m.id)))S.borrados[m.id]=ahora});S.movs=j.movs.map(m=>Object.assign({},m,{mod:ahora}));S.cats=j.cats||S.cats;S.catsMod=ahora;guardar();llenarCats();pintar();pintarAj()}}
       catch(_){alert("El archivo no es una copia válida.")}};
     r.readAsText(f);e.target.value="";
   };
@@ -412,16 +537,13 @@ addEventListener("beforeinstallprompt",e=>{e.preventDefault();evInst=e;$("inst")
 addEventListener("appinstalled",()=>{$("inst").hidden=true;evInst=null});
 $("instalar").onclick=async()=>{if(!evInst)return;evInst.prompt();await evInst.userChoice;evInst=null;$("inst").hidden=true};
 if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&S.sync.url&&Date.now()-ultimaSync>30000)sincronizar()});
 (async()=>{
   await cargar();
   const conectar=leerEnlace();
   init();
-  if(conectar){
-    if(S.movs.length===0){
-      try{await bajar();llenarCats();pintar();estado("Conectado: datos traídos de la nube")}
-      catch(e){persistir();estado("Conectado. No se pudieron leer los datos de la nube todavía")}
-    }else{guardar();estado("Conectado a la nube")}
-  }
+  if(conectar)persistir();
+  if(S.sync.url)sincronizar();
 })();
 </script>
 </body>
