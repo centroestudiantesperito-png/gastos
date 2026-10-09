@@ -102,6 +102,10 @@ tfoot td{font-weight:700;border-top:2px solid var(--lav);background:#faf9fe}
 td.in,td.out,td.mute{font-weight:600}
 @media (max-width:560px){.tiles.evo{grid-template-columns:1fr}}
 .ac{display:flex;gap:6px;flex:none}
+.chip button.ed{font-size:.95rem;padding:0 4px}
+.chip-ed{background:#fff;border-color:#b3abf0;padding:3px 4px 3px 6px}
+.ced{width:150px;padding:4px 10px;border-radius:999px;font-size:.9rem}
+.chip-ed button.ok{color:var(--in);font-weight:700}
 /* bienvenida */
 #splash{position:fixed;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:24px;
  background:radial-gradient(420px 320px at 85% 10%,#fff6 0,transparent 70%),linear-gradient(150deg,#d9d4f7,#cfe6f7 55%,#cdeee0);transition:opacity .6s}
@@ -224,7 +228,7 @@ td.in,td.out,td.mute{font-weight:600}
     <h2>Categorías de ingresos</h2>
     <div class="chips" id="chips-ingreso"></div>
     <div class="add"><input id="nuevo-ingreso" placeholder="Nueva categoría de ingreso" maxlength="30" aria-label="Nueva categoría de ingreso"><button type="button" class="main" data-add="ingreso">Agregar</button></div>
-    <p class="mute" style="font-size:.88rem">Si borrás una categoría, los movimientos ya cargados la conservan.</p>
+    <p class="mute" style="font-size:.88rem">Tocá ✎ para cambiar el nombre: los movimientos ya cargados se actualizan. Si quitás una categoría con ×, esos movimientos la conservan.</p>
   </div>
 
   <div class="card">
@@ -263,7 +267,8 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 const TITULAR="Guillermo Rodríguez";
 const ICONOS={"Comida":"🍽️","Supermercado":"🛒","Transporte":"🚌","Combustible":"⛽","Vivienda":"🏠","Alquiler":"🔑","Servicios":"💡","Internet y celular":"📱","Salud":"💊","Educación":"🎓","Ocio":"🎬","Ropa":"👕","Compras":"🛍️","Mascotas":"🐾","Impuestos":"🧾","Regalos":"🎁","Otros":"✨","Sueldo":"💼","Extra":"➕","Intereses":"📈","Ventas":"🏷️"};
 const PASTEL=[["#e4dfff","#9d93e8"],["#d8ecfa","#7fb8e3"],["#d6f2e6","#7fcfae"],["#fbdde4","#ec9fb2"],["#fbf0c9","#e6c767"],["#fbe0d0","#efa97e"],["#e6f1cf","#a9cf72"],["#efdcf8","#c08ee0"]];
-const icono=c=>ICONOS[c]||"🏷️";
+const PALABRAS=[[/comid|aliment|restaur|almuerz|cena|delivery/i,"🍽️"],[/super|mercado|almac/i,"🛒"],[/transp|colectivo|sube|taxi|uber|tren/i,"🚌"],[/nafta|combust|gnc/i,"⛽"],[/auto|cochera|patente/i,"🚗"],[/casa|vivienda|hogar/i,"🏠"],[/alquiler|expensa/i,"🔑"],[/luz|gas|agua|servicio/i,"💡"],[/internet|celular|tel[eé]fono|wifi/i,"📱"],[/salud|farmac|m[eé]dic|prepaga|obra social|dentista/i,"💊"],[/educ|curso|escuela|colegio|facultad|libro/i,"🎓"],[/ocio|salida|cine|entreten|juego|streaming|suscrip/i,"🎬"],[/ropa|calzado|indument|zapat/i,"👕"],[/compra|shopping/i,"🛍️"],[/mascota|perro|gato|veterin/i,"🐾"],[/impuesto|monotributo|afip|arba|tasa/i,"🧾"],[/regalo/i,"🎁"],[/viaje|vacacion|turismo/i,"✈️"],[/gimnasio|deporte|club/i,"🏋️"],[/sueldo|salario|honorario|jornal/i,"💼"],[/inter[eé]s|inversi|plazo fijo|dividendo/i,"📈"],[/venta/i,"🏷️"]];
+const icono=c=>ICONOS[c]||(PALABRAS.find(([r])=>r.test(c))||[0,"🏷️"])[1];
 const color=c=>PASTEL[[...String(c)].reduce((a,ch)=>a+ch.charCodeAt(0),0)%PASTEL.length];
 
 /* ---- almacenamiento: localStorage + IndexedDB + nube opcional ---- */
@@ -443,9 +448,44 @@ function pintarInf(){
 }
 
 /* ---- ajustes ---- */
+let editCat=null;
+function clicChip(e){
+  const b=e.target.closest("button");if(!b||!b.dataset.t)return;
+  const t=b.dataset.t,c=b.dataset.c,acc=b.dataset.acc;
+  if(acc==="ed"){editCat={t,c};pintarAj();const i=document.querySelector(".ced");if(i){i.focus();i.select()}}
+  else if(acc==="no"){editCat=null;pintarAj()}
+  else if(acc==="ok")guardarCat();
+  else if(acc==="del")quitarCat(t,c);
+}
+function teclaChip(e){
+  if(!e.target.classList||!e.target.classList.contains("ced"))return;
+  if(e.key==="Enter"){e.preventDefault();guardarCat()}
+  if(e.key==="Escape"){editCat=null;pintarAj()}
+}
+function quitarCat(t,c){
+  const n=S.movs.filter(m=>m.tipo===t&&m.cat===c).length;
+  if(n&&!confirm(n+(n>1?" movimientos usan":" movimiento usa")+" «"+c+"». Seguirán mostrándola en los informes. ¿Quitarla de la lista?"))return;
+  S.cats[t]=S.cats[t].filter(x=>x!==c);S.catsMod=Date.now();guardar();llenarCats();pintarAj();
+}
+function renombrarMovs(t,a,b){const ahora=Date.now();S.movs.forEach(m=>{if(m.tipo===t&&m.cat===a){m.cat=b;m.mod=ahora}})}
+function guardarCat(){
+  const inp=document.querySelector(".ced");if(!inp||!editCat)return;
+  const{t,c}=editCat,nuevo=inp.value.trim().replace(/\s+/g," ");
+  if(!nuevo||nuevo===c){editCat=null;pintarAj();return}
+  const otra=S.cats[t].find(x=>x!==c&&x.toLowerCase()===nuevo.toLowerCase());
+  if(otra){
+    if(!confirm("Ya existe «"+otra+"». ¿Unir «"+c+"» con ella? Los movimientos pasarán a «"+otra+"»."))return;
+    renombrarMovs(t,c,otra);S.cats[t]=S.cats[t].filter(x=>x!==c);
+  }else{
+    renombrarMovs(t,c,nuevo);S.cats[t]=S.cats[t].map(x=>x===c?nuevo:x);
+  }
+  S.catsMod=Date.now();editCat=null;guardar();llenarCats();pintar();pintarAj();
+}
 function pintarAj(){
   for(const t of ["gasto","ingreso"])
-    $("chips-"+t).innerHTML=S.cats[t].map(c=>`<span class="chip">${icono(c)} ${esc(c)}<button type="button" data-t="${t}" data-c="${esc(c)}" aria-label="Quitar ${esc(c)}">×</button></span>`).join("");
+    $("chips-"+t).innerHTML=S.cats[t].map(c=>(editCat&&editCat.t===t&&editCat.c===c)
+      ?`<span class="chip chip-ed"><input class="ced" value="${esc(c)}" maxlength="30" aria-label="Nuevo nombre de ${esc(c)}"><button type="button" class="ok" data-t="${t}" data-c="${esc(c)}" data-acc="ok" aria-label="Guardar nombre">✓</button><button type="button" data-t="${t}" data-c="${esc(c)}" data-acc="no" aria-label="Cancelar">✕</button></span>`
+      :`<span class="chip">${icono(c)} ${esc(c)}<button type="button" class="ed" data-t="${t}" data-c="${esc(c)}" data-acc="ed" aria-label="Cambiar nombre de ${esc(c)}">✎</button><button type="button" data-t="${t}" data-c="${esc(c)}" data-acc="del" aria-label="Quitar ${esc(c)}">×</button></span>`).join("");
   $("url").value=S.sync.url||"";$("clave").value=S.sync.clave||"";
 }
 
@@ -479,10 +519,7 @@ function init(){
     inp.value="";inp.focus();
   }));
   ["gasto","ingreso"].forEach(t=>$("nuevo-"+t).addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();document.querySelector(`[data-add=${t}]`).click()}}));
-  document.querySelectorAll(".chips").forEach(c=>c.addEventListener("click",e=>{
-    const t=e.target.dataset.t;if(!t)return;
-    S.cats[t]=S.cats[t].filter(x=>x!==e.target.dataset.c);S.catsMod=Date.now();guardar();llenarCats();pintarAj();
-  }));
+  document.querySelectorAll(".chips").forEach(c=>{c.addEventListener("click",clicChip);c.addEventListener("keydown",teclaChip)});
   $("s-save").onclick=()=>{
     S.sync={url:$("url").value.trim(),clave:$("clave").value.trim()};guardar();
     if(S.sync.url)sincronizar();else estado("Nube desactivada");
